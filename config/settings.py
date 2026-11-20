@@ -10,4 +10,5 @@ NMI_FILE = DATA_DIR / "NMI_MASTER_FULL.parquet"
 PARQUET_FILES = {
     "NB": NB_FILE,
     "SB": SB_FILE,
+    "NMI": NMI_FILE,
 }
