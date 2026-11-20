@@ -1,3 +1,4 @@
+
 import duckdb
 import re
 
@@ -15,13 +16,9 @@ def sql_path(path):
 
 
 def _circle_column_expression(con, file_path):
-    """Return the source circle column as a safely quoted SQL expression.
-
-    Supports common source headers such as Circle, Circle Name, and circle_name.
-    If a particular source file has no circle field, returns NULL so the UNION
-    schema remains consistent.
-    """
+    """Detect a circle column or return NULL if unavailable."""
     path = sql_path(file_path)
+
     schema = con.execute(
         f"DESCRIBE SELECT * FROM read_parquet({path})"
     ).fetchall()
@@ -30,23 +27,20 @@ def _circle_column_expression(con, file_path):
         re.sub(r"[^a-z0-9]", "", str(row[0]).lower()): str(row[0])
         for row in schema
     }
+
     for candidate in ("circle", "circlename", "circle_name"):
         normalized = re.sub(r"[^a-z0-9]", "", candidate.lower())
+
         if normalized in candidates:
             actual_name = candidates[normalized]
             quoted_name = '"' + actual_name.replace('"', '""') + '"'
             return f"CAST({quoted_name} AS VARCHAR)"
+
     return "NULL::VARCHAR"
 
 
 def create_analytics_views(con):
-    """Create analytical views over the existing Parquet files.
-
-    MI worker IDs are standardized from ``mi_updated_by`` and NMI worker
-    IDs from ``updated_by`` into one common ``field_worker_id`` column.
-    Circle headers are detected from common variants in each Parquet source.
-    Original Parquet files are not modified.
-    """
+    """Create analytical views over NB, SB and NMI Parquet files."""
 
     for source, file_path in PARQUET_FILES.items():
         if not file_path.exists():
@@ -57,7 +51,9 @@ def create_analytics_views(con):
     # NB and SB: MI datasets
     for source in ["NB", "SB"]:
         path = sql_path(PARQUET_FILES[source])
-        circle_expression = _circle_column_expression(con, PARQUET_FILES[source])
+        circle_expression = _circle_column_expression(
+            con, PARQUET_FILES[source]
+        )
 
         con.execute(f"""
             CREATE OR REPLACE VIEW {source.lower()}_data AS
@@ -91,7 +87,9 @@ def create_analytics_views(con):
 
     # NMI dataset
     nmi_path = sql_path(PARQUET_FILES["NMI"])
-    nmi_circle_expression = _circle_column_expression(con, PARQUET_FILES["NMI"])
+    nmi_circle_expression = _circle_column_expression(
+        con, PARQUET_FILES["NMI"]
+    )
 
     con.execute(f"""
         CREATE OR REPLACE VIEW nmi_data AS
@@ -107,19 +105,19 @@ def create_analytics_views(con):
             section,
             consumer_id,
             installation_number,
-            "Load" AS load,
-            "Load Category" AS load_category,
+            NULL::VARCHAR AS load,
+            NULL::VARCHAR AS load_category,
             vendor_manager,
             "Vendor Type" AS vendor_type,
-            cat_code,
+            NULL::VARCHAR AS cat_code,
             CAST(updated_by AS VARCHAR) AS field_worker_id,
             NULL::VARCHAR AS mi_updated_at,
             NULL::VARCHAR AS last_updated_at,
             completion_date,
             NULL::VARCHAR AS ci_meter_status,
             verification_status,
-            nmi_meter_number AS meter_number,
-            origin_id
+            NULL::VARCHAR AS meter_number,
+            NULL::VARCHAR AS origin_id
         FROM read_parquet({nmi_path})
     """)
 
@@ -131,7 +129,7 @@ def create_analytics_views(con):
         SELECT * FROM sb_data
     """)
 
-    # Combined MI + NMI analytical dataset
+    # Combined MI + NMI dataset
     con.execute("""
         CREATE OR REPLACE VIEW all_installations AS
         SELECT * FROM mi_data
@@ -147,7 +145,10 @@ def check_parquet_files():
     try:
         for source, file_path in PARQUET_FILES.items():
             if not file_path.exists():
-                results[source] = {"status": "Missing", "rows": 0}
+                results[source] = {
+                    "status": "Missing",
+                    "rows": 0
+                }
                 continue
 
             total_rows = con.execute(
@@ -159,6 +160,7 @@ def check_parquet_files():
                 "status": "Connected",
                 "rows": total_rows
             }
+
     finally:
         con.close()
 
